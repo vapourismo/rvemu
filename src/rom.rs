@@ -4,131 +4,6 @@ use crate::bus::MROM_BASE;
 use crate::cpu::{BYTE, DOUBLEWORD, HALFWORD, WORD};
 use crate::exception::Exception;
 
-use std::fs::File;
-use std::io::prelude::*;
-use std::process::Command;
-
-const DTS_FILE_NAME: &str = "rvemu.dts";
-const DTB_FILE_NAME: &str = "rvemu.dtb";
-
-/// Create a new dts file. If the file already existed, the old content is destroyed. Otherwise, a new file is created.
-fn create_dts() -> std::io::Result<()> {
-    // TODO: Make this content more flexible depending on the number of cpus.
-    // Reference code is https://github.com/riscv/riscv-isa-sim/blob/66b44bfbedda562a32e4a2cd0716afbf731b69cd/riscv/dts.cc#L38-L54
-    let content = r#"/dts-v1/;
-
-/ {
-    #address-cells = <0x02>;
-    #size-cells = <0x02>;
-    compatible = "riscv-virtio";
-    model = "riscv-virtio,qemu";
-
-    chosen {
-        bootargs = "root=/dev/vda ro console=ttyS0";
-        stdout-path = "/uart@10000000";
-    };
-
-    uart@10000000 {
-        interrupts = <0xa>;
-        interrupt-parent = <0x03>;
-        clock-frequency = <0x384000>;
-        reg = <0x0 0x10000000 0x0 0x100>;
-        compatible = "ns16550a";
-    };
-
-    virtio_mmio@10001000 {
-        interrupts = <0x01>;
-        interrupt-parent = <0x03>;
-        reg = <0x0 0x10001000 0x0 0x1000>;
-        compatible = "virtio,mmio";
-    };
-
-    cpus {
-        #address-cells = <0x01>;
-        #size-cells = <0x00>;
-        timebase-frequency = <0x989680>;
-
-        cpu-map {
-            cluster0 {
-                core0 {
-                    cpu = <0x01>;
-                };
-            };
-        };
-
-        cpu@0 {
-            phandle = <0x01>;
-            device_type = "cpu";
-            reg = <0x00>;
-            status = "okay";
-            compatible = "riscv";
-            riscv,isa = "rv64imafdcsu";
-            mmu-type = "riscv,sv48";
-
-            interrupt-controller {
-                #interrupt-cells = <0x01>;
-                interrupt-controller;
-                compatible = "riscv,cpu-intc";
-                phandle = <0x02>;
-            };
-        };
-    };
-
-	memory@80000000 {
-		device_type = "memory";
-		reg = <0x0 0x80000000 0x0 0x8000000>;
-	};
-
-    soc {
-        #address-cells = <0x02>;
-        #size-cells = <0x02>;
-        compatible = "simple-bus";
-        ranges;
-
-        interrupt-controller@c000000 {
-            phandle = <0x03>;
-            riscv,ndev = <0x35>;
-            reg = <0x00 0xc000000 0x00 0x4000000>;
-            interrupts-extended = <0x02 0x0b 0x02 0x09>;
-            interrupt-controller;
-            compatible = "riscv,plic0";
-            #interrupt-cells = <0x01>;
-            #address-cells = <0x00>;
-        };
-
-        clint@2000000 {
-            interrupts-extended = <0x02 0x03 0x02 0x07>;
-            reg = <0x00 0x2000000 0x00 0x10000>;
-            compatible = "riscv,clint0";
-        };
-    };
-};"#;
-
-    let mut dts = File::create(DTS_FILE_NAME)?;
-    dts.write_all(content.as_bytes())?;
-    Ok(())
-}
-
-/// Compile a dts file to a dtb file.
-fn compile_dts() -> std::io::Result<()> {
-    // dtc -I dts -O dtb -o <FILE_NAME>.dtb <FILE_NAME>.dts
-    Command::new("dtc")
-        .args(&["-I", "dts", "-O", "dtb", "-o", DTB_FILE_NAME, DTS_FILE_NAME])
-        .output()?;
-    Ok(())
-}
-
-/// Read a dtb file. First, create a dts file. Second, compile it to a dtb file. Finally, read the dtb file and return the binary content.
-fn dtb() -> std::io::Result<Vec<u8>> {
-    create_dts()?;
-    compile_dts()?;
-
-    let mut dtb = Vec::new();
-    File::open(DTB_FILE_NAME)?.read_to_end(&mut dtb)?;
-
-    Ok(dtb)
-}
-
 /// The read-only memory (ROM).
 pub struct Rom {
     data: Vec<u8>,
@@ -137,22 +12,9 @@ pub struct Rom {
 impl Rom {
     /// Create a new `rom` object.
     pub fn new() -> Self {
-        let mut dtb = match dtb() {
-            Ok(dtb) => dtb,
-            Err(e) => {
-                // TODO: should fail?
-                println!("WARNING: failed to read a device tree binary: {}", e);
-                println!(
-                    "WARNING: maybe need to install dtc commend `apt install device-tree-compiler`"
-                );
-                Vec::new()
-            }
-        };
-
         // TODO: set a reset vector correctly.
         // 0x20 is the size of a reset vector.
         let mut rom = vec![0; 32];
-        rom.append(&mut dtb);
         let align = 0x1000;
         rom.resize((rom.len() + align - 1) / align * align, 0);
 
