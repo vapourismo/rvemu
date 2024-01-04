@@ -418,7 +418,7 @@ impl Cpu {
     }
 
     /// Translate a virtual address to a physical address for the paged virtual-memory system.
-    fn translate(&mut self, addr: u64, access_type: AccessType) -> Result<u64, Exception> {
+    pub fn translate(&mut self, addr: u64, access_type: AccessType) -> Result<u64, Exception> {
         if !self.enable_paging || self.mode == Mode::Machine {
             return Ok(addr);
         }
